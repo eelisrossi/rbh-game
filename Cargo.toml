@@ -1,0 +1,11 @@
+[package]
+name = "reverse-bullet-hell"
+version = "0.1.0"
+edition = "2021"
+author = "Eelis Rossi"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bevy = "0.11.0"
+rand = "0.8.5"
