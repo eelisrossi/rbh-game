@@ -1,19 +1,25 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use rand::prelude::*;
+use std::f32::consts::PI;
 
 pub const PLAYER_SPEED: f32 = 500.0;
 pub const PLAYER_SIZE: f32 = 64.0; // This is the player sprite size.
-pub const NUMBER_OF_ENEMIES: usize = 4;
+
+// TODO: whenever the number of enemies is increased
+// also increase the safe area around the player so the enemies
+// don't collide on spawn too much
+pub const NUMBER_OF_ENEMIES: usize = 100;
+pub const PLAYER_SAFE_AREA: f32 = 700.0;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_startup_system(spawn_camera)
-        .add_startup_system(spawn_player)
-        .add_startup_system(spawn_enemies)
-        .add_system(player_movement)
-        .add_system(confine_player_movement)
+        .add_systems(Startup, spawn_camera)
+        .add_systems(Startup, spawn_player)
+        .add_systems(PostStartup, spawn_enemies)
+        .add_systems(Update, player_movement)
+        .add_systems(Update, camera_track_player)
         .run();
 }
 
@@ -44,21 +50,26 @@ pub fn spawn_camera(mut commands: Commands, window_query: Query<&Window, With<Pr
     let window = window_query.get_single().unwrap();
 
     commands.spawn(Camera2dBundle {
-        transform: Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, 0.0),
+        transform: Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, 1.0),
         ..default()
     });
 }
 
 pub fn spawn_enemies(
     mut commands: Commands,
-    window_query: Query<&Window, With<PrimaryWindow>>,
+    player_transform: Query<&Transform, With<Player>>,
     asset_server: Res<AssetServer>,
 ) {
-    let window = window_query.get_single().unwrap();
+    let playertrans = player_transform.single().translation.truncate();
 
     for _ in 0..NUMBER_OF_ENEMIES {
-        let random_x = random::<f32>() * window.width();
-        let random_y = random::<f32>() * window.height();
+        // spawn enemies on the circumference of a circle
+        // where r = PLAYER_SAFE_AREA + (rand * int)
+        // and angle = rand * 2 * PI
+        let radius = PLAYER_SAFE_AREA + (random::<f32>() * 100.0);
+        let theta = random::<f32>() * 2.0 * PI;
+        let random_x = playertrans.x + radius * theta.cos();
+        let random_y = playertrans.y + radius * theta.sin();
 
         commands.spawn((
             SpriteBundle {
@@ -69,6 +80,16 @@ pub fn spawn_enemies(
             Enemy {},
         ));
     }
+}
+
+pub fn camera_track_player(
+    mut camera_transform: Query<&mut Transform, With<Camera>>,
+    player_transform: Query<&Transform, (With<Player>, Without<Camera>)>,
+) {
+    let mut camera_trans = camera_transform.single_mut();
+    let playertrans = player_transform.single().translation.truncate();
+    let camtrans = camera_trans.translation.truncate();
+    camera_trans.translation = camtrans.lerp(playertrans, 0.1).extend(999.0);
 }
 
 pub fn player_movement(
@@ -97,37 +118,5 @@ pub fn player_movement(
         }
 
         transform.translation += direction * PLAYER_SPEED * time.delta_seconds();
-    }
-}
-
-pub fn confine_player_movement(
-    mut player_query: Query<&mut Transform, With<Player>>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
-) {
-    if let Ok(mut player_transform) = player_query.get_single_mut() {
-        let window = window_query.get_single().unwrap();
-
-        let half_player_size = PLAYER_SIZE / 2.0; // 32.0
-        let x_min = 0.0 + half_player_size;
-        let x_max = window.width() - half_player_size;
-        let y_min = 0.0 + half_player_size;
-        let y_max = window.height() - half_player_size;
-
-        let mut translation = player_transform.translation;
-
-        // Bound the player x position
-        if translation.x < x_min {
-            translation.x = x_min;
-        } else if translation.x > x_max {
-            translation.x = x_max;
-        }
-        // Bound the players y position.
-        if translation.y < y_min {
-            translation.y = y_min;
-        } else if translation.y > y_max {
-            translation.y = y_max;
-        }
-
-        player_transform.translation = translation;
     }
 }
