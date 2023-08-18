@@ -11,3 +11,12 @@ $ git clone https://github.com/eelisrossi/rbh-game.git
 $ cd rbg-game
 $ cargo run
 ```
+
+## Assets used
+
+Assets by Kenney (www.kenney.nl)
+
+- Impact Sounds (1.0)
+- Interface Sounds (1.0)
+- Rolling Ball Assets
+- Sci-Fi Sounds (1.0)

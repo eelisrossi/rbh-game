@@ -10,6 +10,8 @@ pub const PLAYER_SIZE: f32 = 64.0; // This is the player sprite size.
 // also increase the safe area around the player so the enemies
 // don't collide on spawn too much
 pub const NUMBER_OF_ENEMIES: usize = 100;
+pub const ENEMY_SPEED: f32 = 100.0;
+pub const ENEMY_SIZE: f32 = 64.0;
 pub const PLAYER_SAFE_AREA: f32 = 700.0;
 
 fn main() {
@@ -20,6 +22,7 @@ fn main() {
         .add_systems(PostStartup, spawn_enemies)
         .add_systems(Update, player_movement)
         .add_systems(Update, camera_track_player)
+        .add_systems(Update, enemy_movement)
         .run();
 }
 
@@ -27,7 +30,9 @@ fn main() {
 pub struct Player {}
 
 #[derive(Component)]
-pub struct Enemy {}
+pub struct Enemy {
+    pub direction: Vec2,
+}
 
 pub fn spawn_player(
     mut commands: Commands,
@@ -55,6 +60,16 @@ pub fn spawn_camera(mut commands: Commands, window_query: Query<&Window, With<Pr
     });
 }
 
+pub fn camera_track_player(
+    mut camera_transform: Query<&mut Transform, With<Camera>>,
+    player_transform: Query<&Transform, (With<Player>, Without<Camera>)>,
+) {
+    let mut camera_trans = camera_transform.single_mut();
+    let playertrans = player_transform.single().translation.truncate();
+    let camtrans = camera_trans.translation.truncate();
+    camera_trans.translation = camtrans.lerp(playertrans, 0.1).extend(999.0);
+}
+
 pub fn spawn_enemies(
     mut commands: Commands,
     player_transform: Query<&Transform, With<Player>>,
@@ -63,7 +78,7 @@ pub fn spawn_enemies(
     let playertrans = player_transform.single().translation.truncate();
 
     for _ in 0..NUMBER_OF_ENEMIES {
-        // spawn enemies on the circumference of a circle
+        // spawns enemies on the circumference of a circle
         // where r = PLAYER_SAFE_AREA + (rand * int)
         // and angle = rand * 2 * PI
         let radius = PLAYER_SAFE_AREA + (random::<f32>() * 100.0);
@@ -77,19 +92,11 @@ pub fn spawn_enemies(
                 texture: asset_server.load("sprites/ball_red_large.png"),
                 ..default()
             },
-            Enemy {},
+            Enemy {
+                direction: Vec2::new(random::<f32>(), random::<f32>()).normalize(),
+            },
         ));
     }
-}
-
-pub fn camera_track_player(
-    mut camera_transform: Query<&mut Transform, With<Camera>>,
-    player_transform: Query<&Transform, (With<Player>, Without<Camera>)>,
-) {
-    let mut camera_trans = camera_transform.single_mut();
-    let playertrans = player_transform.single().translation.truncate();
-    let camtrans = camera_trans.translation.truncate();
-    camera_trans.translation = camtrans.lerp(playertrans, 0.1).extend(999.0);
 }
 
 pub fn player_movement(
@@ -118,5 +125,20 @@ pub fn player_movement(
         }
 
         transform.translation += direction * PLAYER_SPEED * time.delta_seconds();
+    }
+}
+
+pub fn enemy_movement(
+    player_query: Query<&Transform, (With<Player>, Without<Enemy>)>,
+    mut enemy_transform: Query<(&mut Transform, &Enemy)>,
+    time: Res<Time>,
+) {
+    let player_transform = player_query.single();
+
+    for (mut transform, _enemy) in &mut enemy_transform {
+        let direction = (transform.translation.truncate()
+            - player_transform.translation.truncate())
+        .normalize();
+        transform.translation -= (direction * time.delta_seconds() * ENEMY_SPEED).extend(0.);
     }
 }
