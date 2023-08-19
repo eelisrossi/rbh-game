@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use bevy_rapier2d::{prelude::*, render::RapierDebugRenderPlugin};
 use rand::prelude::*;
 use std::f32::consts::PI;
 
@@ -9,14 +10,24 @@ pub const PLAYER_SIZE: f32 = 64.0; // This is the player sprite size.
 // TODO: whenever the number of enemies is increased
 // also increase the safe area around the player so the enemies
 // don't collide on spawn too much
+// C = 2 * PI * R -> R = C / (2 * PI)
+// C = NUMBER_OF_ENEMIES * ENEMY_SIZE
 pub const NUMBER_OF_ENEMIES: usize = 100;
-pub const ENEMY_SPEED: f32 = 100.0;
+pub const ENEMY_SPEED: f32 = 200.0;
 pub const ENEMY_SIZE: f32 = 64.0;
-pub const PLAYER_SAFE_AREA: f32 = 700.0;
+pub const PLAYER_SAFE_AREA: f32 = (NUMBER_OF_ENEMIES as f32 * (ENEMY_SIZE * 0.8)) / (2.0 * PI);
+// pub const PLAYER_SAFE_AREA: f32 = 700.0;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
+        // TODO: fix performance with lots of enemies
+        .insert_resource(RapierConfiguration {
+            gravity: Vec2::ZERO,
+            ..default()
+        })
+        .add_plugins(RapierDebugRenderPlugin::default())
         .add_systems(Startup, spawn_camera)
         .add_systems(Startup, spawn_player)
         .add_systems(PostStartup, spawn_enemies)
@@ -26,9 +37,13 @@ fn main() {
         .run();
 }
 
+// TODO: Collision
+// TODO: HP / Damage
 #[derive(Component)]
 pub struct Player {}
 
+// TODO: Collision
+// TODO: HP / Damage
 #[derive(Component)]
 pub struct Enemy {
     pub direction: Vec2,
@@ -48,8 +63,17 @@ pub fn spawn_player(
             ..default()
         },
         Player {},
+        RigidBody::Dynamic,
+        LockedAxes::ROTATION_LOCKED_Z,
+        Damping {
+            linear_damping: 100.0,
+            angular_damping: 1.0,
+        },
+        Collider::ball(PLAYER_SIZE / 2.0), // for some reason the collider lags just a bit behind the sprite
     ));
 }
+
+pub fn player_collision() {}
 
 pub fn spawn_camera(mut commands: Commands, window_query: Query<&Window, With<PrimaryWindow>>) {
     let window = window_query.get_single().unwrap();
@@ -95,10 +119,18 @@ pub fn spawn_enemies(
             Enemy {
                 direction: Vec2::new(random::<f32>(), random::<f32>()).normalize(),
             },
+            RigidBody::Dynamic,
+            LockedAxes::ROTATION_LOCKED_Z,
+            Damping {
+                linear_damping: 100.0,
+                angular_damping: 1.0,
+            },
+            Collider::ball(ENEMY_SIZE / 2.0),
         ));
     }
 }
 
+// TODO: Fix the collider lagging behind when moving
 pub fn player_movement(
     keyboard_input: Res<Input<KeyCode>>,
     mut player_query: Query<&mut Transform, With<Player>>,
