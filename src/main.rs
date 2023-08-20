@@ -22,6 +22,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
+        .add_state::<AppState>()
         // TODO: fix performance with lots of enemies
         .insert_resource(RapierConfiguration {
             gravity: Vec2::ZERO,
@@ -29,24 +30,131 @@ fn main() {
         })
         .add_plugins(RapierDebugRenderPlugin::default())
         .add_systems(Startup, spawn_camera)
+        .add_systems(OnEnter(AppState::Menu), setup_menu)
+        .add_systems(Update, menu.run_if(in_state(AppState::Menu)))
+        .add_systems(OnExit(AppState::Menu), cleanup_menu)
         .add_systems(Startup, spawn_player)
         .add_systems(PostStartup, spawn_enemies)
-        .add_systems(Update, player_movement)
-        .add_systems(Update, camera_track_player)
-        .add_systems(Update, enemy_movement)
+        .add_systems(
+            Update,
+            (
+                player_movement,
+                camera_track_player,
+                enemy_movement,
+                enemy_damage_player,
+                check_player_health,
+            )
+                .run_if(in_state(AppState::InGame)),
+        )
+        // .add_systems(Update, player_movement)
+        // .add_systems(Update, camera_track_player)
+        // .add_systems(Update, enemy_movement)
+        // .add_systems(Update, enemy_damage_player)
+        // .add_systems(Update, check_player_health)
         .run();
 }
 
-// TODO: Collision
-// TODO: HP / Damage
-#[derive(Component)]
-pub struct Player {}
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
+enum AppState {
+    #[default]
+    Menu,
+    InGame,
+}
 
-// TODO: Collision
+#[derive(Resource)]
+struct MenuData {
+    button_entity: Entity,
+}
+
+const NORMAL_BUTTON: Color = Color::rgb(0.15, 0.15, 0.15);
+const HOVERED_BUTTON: Color = Color::rgb(0.25, 0.25, 0.25);
+const PRESSED_BUTTON: Color = Color::rgb(0.35, 0.75, 0.35);
+
+fn setup_menu(mut commands: Commands) {
+    let button_entity = commands
+        .spawn(NodeBundle {
+            style: Style {
+                // center button
+                width: Val::Percent(100.),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            ..default()
+        })
+        .with_children(|parent| {
+            parent
+                .spawn(ButtonBundle {
+                    style: Style {
+                        width: Val::Px(150.),
+                        height: Val::Px(65.),
+                        // horizontally center child text
+                        justify_content: JustifyContent::Center,
+                        // vertically center child text
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    background_color: NORMAL_BUTTON.into(),
+                    ..default()
+                })
+                .with_children(|parent| {
+                    parent.spawn(TextBundle::from_section(
+                        "Play",
+                        TextStyle {
+                            font_size: 40.0,
+                            color: Color::rgb(0.9, 0.9, 0.9),
+                            ..default()
+                        },
+                    ));
+                });
+        })
+        .id();
+    commands.insert_resource(MenuData { button_entity });
+}
+
+fn menu(
+    mut next_state: ResMut<NextState<AppState>>,
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<Button>),
+    >,
+) {
+    for (interaction, mut color) in &mut interaction_query {
+        match *interaction {
+            Interaction::Pressed => {
+                *color = PRESSED_BUTTON.into();
+                next_state.set(AppState::InGame);
+            }
+            Interaction::Hovered => {
+                *color = HOVERED_BUTTON.into();
+            }
+            Interaction::None => {
+                *color = NORMAL_BUTTON.into();
+            }
+        }
+    }
+}
+
+fn cleanup_menu(mut commands: Commands, menu_data: Res<MenuData>) {
+    commands.entity(menu_data.button_entity).despawn_recursive();
+}
+
 // TODO: HP / Damage
+// add movement speed to the struct so it can be altered later
+#[derive(Component)]
+pub struct Player {
+    pub health: f32,
+    // pub speed: f32,
+}
+
+// TODO: HP / Damage
+// add movement speed to the struct so it can be altered later
 #[derive(Component)]
 pub struct Enemy {
     pub direction: Vec2,
+    pub health: f32,
+    pub damage_per_second: f32,
+    // pub speed: f32,
 }
 
 pub fn spawn_player(
@@ -62,7 +170,7 @@ pub fn spawn_player(
             texture: asset_server.load("sprites/ball_blue_large.png"),
             ..default()
         },
-        Player {},
+        Player { health: 5.0 },
         RigidBody::Dynamic,
         LockedAxes::ROTATION_LOCKED_Z,
         Damping {
@@ -72,8 +180,6 @@ pub fn spawn_player(
         Collider::ball(PLAYER_SIZE / 2.0), // for some reason the collider lags just a bit behind the sprite
     ));
 }
-
-pub fn player_collision() {}
 
 pub fn spawn_camera(mut commands: Commands, window_query: Query<&Window, With<PrimaryWindow>>) {
     let window = window_query.get_single().unwrap();
@@ -118,6 +224,8 @@ pub fn spawn_enemies(
             },
             Enemy {
                 direction: Vec2::new(random::<f32>(), random::<f32>()).normalize(),
+                health: 2.0,
+                damage_per_second: 1.0,
             },
             RigidBody::Dynamic,
             LockedAxes::ROTATION_LOCKED_Z,
@@ -172,5 +280,36 @@ pub fn enemy_movement(
             - player_transform.translation.truncate())
         .normalize();
         transform.translation -= (direction * time.delta_seconds() * ENEMY_SPEED).extend(0.);
+    }
+}
+
+pub fn enemy_damage_player(
+    enemies: Query<(&Collider, &GlobalTransform, &Enemy)>,
+    mut player: Query<&mut Player>,
+    rapier_context: Res<RapierContext>,
+    time: Res<Time>,
+) {
+    for (collider, transform, enemy) in &enemies {
+        rapier_context.intersections_with_shape(
+            transform.translation().truncate(),
+            0.0,
+            collider,
+            QueryFilter::new(),
+            |entity| {
+                if let Ok(mut player) = player.get_mut(entity) {
+                    player.health -= enemy.damage_per_second * time.delta_seconds();
+                    println!("Player's health is: {}", player.health);
+                }
+                true
+            },
+        );
+    }
+}
+
+pub fn check_player_health(player: Query<&Player>) {
+    let player = player.single();
+
+    if player.health <= 0.0 {
+        println!("The Player is DEAD!!!");
     }
 }
