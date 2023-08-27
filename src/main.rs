@@ -36,7 +36,10 @@ fn main() {
         .add_systems(OnEnter(AppState::Menu), setup_menu)
         .add_systems(Update, menu.run_if(in_state(AppState::Menu)))
         .add_systems(OnExit(AppState::Menu), (cleanup_menu, spawn_player))
-        .add_systems(OnEnter(AppState::InGame), spawn_enemies)
+        .add_systems(
+            OnEnter(AppState::InGame),
+            (spawn_enemies, spawn_player_hp_ui),
+        )
         // .add_systems(Startup, spawn_player)
         // .add_systems(PostStartup, spawn_enemies)
         .add_systems(
@@ -50,6 +53,7 @@ fn main() {
                 close_shot_attack,
                 close_shot_bullet,
                 enemy_death_check,
+                update_player_hp_ui,
             )
                 .run_if(in_state(AppState::InGame)),
         )
@@ -191,6 +195,50 @@ fn spawn_player(
             Collider::ball(player_size / 2.0), // for some reason the collider lags just a bit behind the sprite
         ))
         .add_child(close_shot);
+}
+
+#[derive(Component)]
+pub struct PlayerUI;
+
+#[derive(Component)]
+pub struct HealthUI;
+
+fn spawn_player_hp_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
+    commands.spawn((
+        TextBundle::from_sections([
+            TextSection::new(
+                "HP: ",
+                TextStyle {
+                    font: asset_server.load("fonts/Long_Shot.ttf"),
+                    font_size: 100.0,
+                    color: Color::WHITE,
+                },
+            ),
+            TextSection::from_style(TextStyle {
+                font: asset_server.load("fonts/Long_Shot.ttf"),
+                font_size: 100.0,
+                color: Color::WHITE,
+            }),
+        ])
+        .with_text_alignment(TextAlignment::Center)
+        .with_style(Style {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(5.),
+            right: Val::Vw(50.),
+            ..default()
+        }),
+        HealthUI,
+    ));
+}
+
+fn update_player_hp_ui(
+    mut player_hp_text: Query<&mut Text, With<HealthUI>>,
+    player: Query<&Player>,
+) {
+    let player_hp = player.single().health.floor();
+    for mut text in &mut player_hp_text {
+        text.sections[1].value = format!("{player_hp}");
+    }
 }
 
 // TODO: Fix the collider lagging behind when moving
@@ -380,7 +428,8 @@ fn enemy_death_check(mut commands: Commands, mut enemies: Query<(Entity, &Transf
 
 #[derive(Component)]
 pub struct CloseShot {
-    pub timer: Timer,
+    pub atk_speed: Timer,
+    pub atk_range: f32,
 }
 
 #[derive(Component)]
@@ -397,7 +446,8 @@ pub fn spawn_close_shot(commands: &mut Commands) -> Entity {
             SpatialBundle::default(),
             Name::new("Close Shot"),
             CloseShot {
-                timer: Timer::from_seconds(1.2, TimerMode::Repeating),
+                atk_speed: Timer::from_seconds(0.2, TimerMode::Repeating),
+                atk_range: 400.0,
             },
         ))
         .id()
@@ -422,9 +472,9 @@ pub fn spawn_close_shot_bullet(
             },
             Name::new("Close Shot Bullet"),
             CloseShotBullet {
-                lifetime: Timer::from_seconds(5.0, TimerMode::Once),
-                damage: 2.0,
-                speed: 4.5,
+                lifetime: Timer::from_seconds(3.0, TimerMode::Once),
+                damage: 0.5,
+                speed: 1000.,
                 direction,
             },
             Sensor,
@@ -474,23 +524,34 @@ fn close_shot_attack(
     time: Res<Time>,
 ) {
     for (transform, mut close_shot) in &mut close_shots {
-        close_shot.timer.tick(time.delta());
-        if close_shot.timer.just_finished() {
+        close_shot.atk_speed.tick(time.delta());
+        if close_shot.atk_speed.just_finished() {
             if let Some(closest_enemy) = enemy.iter().min_by_key(|enemy_transform| {
                 FloatOrd(Vec2::length(
                     transform.translation().truncate() - enemy_transform.translation.truncate(),
                 ))
             }) {
-                let direction = (closest_enemy.translation.truncate()
-                    - transform.translation().truncate())
-                .normalize();
-
-                spawn_close_shot_bullet(
-                    &mut commands,
-                    &assets,
+                let distance = Vec2::distance(
                     transform.translation().truncate(),
-                    direction,
+                    closest_enemy.translation.truncate(),
                 );
+
+                if distance < close_shot.atk_range {
+                    let direction = (closest_enemy.translation.truncate()
+                        - transform.translation().truncate())
+                    .normalize();
+
+                    println!("Closest enemy distance: {}", distance);
+
+                    spawn_close_shot_bullet(
+                        &mut commands,
+                        &assets,
+                        transform.translation().truncate(),
+                        direction,
+                    );
+                } else {
+                    close_shot.atk_speed.tick(time.delta());
+                }
             }
         }
     }
