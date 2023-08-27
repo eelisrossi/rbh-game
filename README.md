@@ -8,7 +8,7 @@ Hopefully blazingly fast Vampire Survivors / Halls of Torment type game.
 
 ```
 $ git clone https://github.com/eelisrossi/rbh-game.git
-$ cd rbg-game
+$ cd rbh-game
 $ cargo run
 ```
 
